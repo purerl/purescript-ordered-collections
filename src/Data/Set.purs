@@ -28,12 +28,7 @@ module Data.Set
 
 import Prelude hiding (map)
 
-import Control.Monad.Rec.Class (Step(..), tailRecM2)
-import Control.Monad.ST (ST)
-import Control.Monad.ST as ST
 import Data.Array as Array
-import Data.Array.ST (STArray)
-import Data.Array.ST as STArray
 import Data.Eq (class Eq1)
 import Data.Foldable (class Foldable, foldMap, foldl, foldr)
 import Data.List (List)
@@ -159,22 +154,22 @@ properSubset s1 s2 = subset s1 s2 && (s1 /= s2)
 
 -- | The set of elements which are in both the first and second set
 intersection :: forall a. Ord a => Set a -> Set a -> Set a
-intersection s1 s2 = fromFoldable (ST.run (STArray.empty >>= intersect >>= STArray.unsafeFreeze))
+intersection s1 s2 = fromFoldable intersect
   where
   toArray = Array.fromFoldable <<< toList
   ls = toArray s1
   rs = toArray s2
   ll = Array.length ls
   rl = Array.length rs
-  intersect :: forall r. STArray r a -> ST r (STArray r a)
-  intersect acc = tailRecM2 go 0 0
+  intersect :: Array a
+  intersect = go [] 0 0
     where
-    go = unsafePartial \l r ->
+    go = unsafePartial \acc l r ->
       if l < ll && r < rl
       then case compare (ls `Array.unsafeIndex` l) (rs `Array.unsafeIndex` r) of
-        EQ -> do
-          _ <- STArray.push (ls `Array.unsafeIndex` l) acc
-          pure $ Loop {a: l + 1, b: r + 1}
-        LT -> pure $ Loop {a: l + 1, b: r}
-        GT -> pure $ Loop {a: l, b: r + 1}
-      else pure $ Done acc
+        EQ ->
+          let acc' = Array.snoc acc (ls `Array.unsafeIndex` l) 
+          in go acc' (l + 1) (r + 1)
+        LT -> go acc (l + 1) r
+        GT -> go acc l (r + 1)
+      else acc
