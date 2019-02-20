@@ -9,6 +9,7 @@ module Data.Map.Internal
   , singleton
   , checkValid
   , insert
+  , insertWith
   , lookup
   , lookupLE
   , lookupLT
@@ -20,6 +21,7 @@ module Data.Map.Internal
   , submap
   , fromFoldable
   , fromFoldableWith
+  , fromFoldableWithIndex
   , toUnfoldable
   , toUnfoldableUnordered
   , delete
@@ -32,18 +34,23 @@ module Data.Map.Internal
   , union
   , unionWith
   , unions
+  , intersection
+  , intersectionWith
+  , difference
   , isSubmap
   , size
   , filterWithKey
   , filterKeys
   , filter
+  , mapMaybeWithKey
+  , mapMaybe
   ) where
 
 import Prelude
 
 import Data.Eq (class Eq1)
 import Data.Foldable (foldl, foldMap, foldr, class Foldable)
-import Data.FoldableWithIndex (class FoldableWithIndex)
+import Data.FoldableWithIndex (class FoldableWithIndex, foldlWithIndex, foldrWithIndex)
 import Data.FunctorWithIndex (class FunctorWithIndex, mapWithIndex)
 import Data.List (List(..), (:), length, nub)
 import Data.List.Lazy as LL
@@ -451,6 +458,13 @@ insert k v = down Nil
       ThreeMiddle a k1 v1 k2 v2 d, KickUp b k' v' c -> up ctx (KickUp (Two a k1 v1 b) k' v' (Two c k2 v2 d))
       ThreeRight a k1 v1 b k2 v2, KickUp c k' v' d -> up ctx (KickUp (Two a k1 v1 b) k2 v2 (Two c k' v' d))
 
+-- | Inserts or updates a value with the given function.
+-- |
+-- | The combining function is called with the existing value as the first
+-- | argument and the new value as the second argument.
+insertWith :: forall k v. Ord k => (v -> v -> v) -> k -> v -> Map k v -> Map k v
+insertWith f k v = alter (Just <<< maybe v (flip f v)) k
+
 -- | Delete a key and its corresponding value from a map.
 delete :: forall k v. Ord k => k -> Map k v -> Map k v
 delete k m = maybe m snd (pop k m)
@@ -552,6 +566,10 @@ fromFoldableWith f = foldl (\m (Tuple k v) -> alter (combine v) k m) empty where
   combine v (Just v') = Just $ f v v'
   combine v Nothing = Just v
 
+-- | Convert any indexed foldable collection into a map.
+fromFoldableWithIndex :: forall f k v. Ord k => FoldableWithIndex k f => f v -> Map k v
+fromFoldableWithIndex = foldlWithIndex (\k m v -> insert k v m) empty
+
 -- | Convert a map to an unfoldable structure of key/value pairs where the keys are in ascending order
 toUnfoldable :: forall f k v. Unfoldable f => Map k v -> f (Tuple k v)
 toUnfoldable m = unfoldr go (m : Nil) where
@@ -612,6 +630,29 @@ union = unionWith const
 unions :: forall k v f. Ord k => Foldable f => f (Map k v) -> Map k v
 unions = foldl union empty
 
+-- | Compute the intersection of two maps, using the specified function
+-- | to combine values for duplicate keys.
+intersectionWith :: forall k a b c. Ord k => (a -> b -> c) -> Map k a -> Map k b -> Map k c
+intersectionWith f m1 m2 = go (toUnfoldable m1 :: List (Tuple k a)) (toUnfoldable m2 :: List (Tuple k b)) empty
+  where
+  go Nil _ m = m
+  go _ Nil m = m
+  go as@(Cons (Tuple k1 a) ass) bs@(Cons (Tuple k2 b) bss) m =
+    case compare k1 k2 of
+         LT -> go ass bs m
+         EQ -> go ass bss (insert k1 (f a b) m)
+         GT -> go as bss m
+
+-- | Compute the intersection of two maps, preferring values from the first map in the case
+-- | of duplicate keys.
+intersection :: forall k a b. Ord k => Map k a -> Map k b -> Map k a
+intersection = intersectionWith const
+
+-- | Difference of two maps. Return elements of the first map where
+-- | the keys do not exist in the second map.
+difference :: forall k v w. Ord k => Map k v -> Map k w -> Map k v
+difference m1 m2 = foldl (flip delete) m1 (keys m2)
+
 -- | Test whether one map contains all of the keys and values contained in another map
 isSubmap :: forall k v. Ord k => Eq v => Map k v -> Map k v -> Boolean
 isSubmap m1 m2 = LL.all f $ (toUnfoldable m1 :: LL.List (Tuple k v))
@@ -638,3 +679,13 @@ filterKeys predicate = filterWithKey $ const <<< predicate
 -- | on the value fails to hold.
 filter :: forall k v. Ord k => (v -> Boolean) -> Map k v -> Map k v
 filter predicate = filterWithKey $ const predicate
+
+-- | Applies a function to each key/value pair in a map, discarding entries
+-- | where the function returns `Nothing`.
+mapMaybeWithKey :: forall k a b. Ord k => (k -> a -> Maybe b) -> Map k a -> Map k b
+mapMaybeWithKey f = foldrWithIndex (\k a acc → maybe acc (\b -> insert k b acc) (f k a)) empty
+
+-- | Applies a function to each value in a map, discarding entries where the
+-- | function returns `Nothing`.
+mapMaybe :: forall k a b. Ord k => (a -> Maybe b) -> Map k a -> Map k b
+mapMaybe = mapMaybeWithKey <<< const

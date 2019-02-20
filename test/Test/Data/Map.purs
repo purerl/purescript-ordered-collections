@@ -4,7 +4,7 @@ import Prelude
 
 import Control.Alt ((<|>))
 import Data.Array as A
-import Data.Foldable (foldl, for_, all)
+import Data.Foldable (foldl, for_, all, and)
 import Data.FoldableWithIndex (foldrWithIndex)
 import Data.Function (on)
 import Data.FunctorWithIndex (mapWithIndex)
@@ -82,6 +82,14 @@ mapTests = do
   log "Test inserting two values with same key"
   quickCheck $ \k v1 v2 ->
     M.lookup (smallKey k) (M.insert k v2 (M.insert k v1 M.empty)) == Just (number v2)
+
+  log "Test insertWith combining values"
+  quickCheck $ \k v1 v2 ->
+    M.lookup (smallKey k) (M.insertWith (+) k v2 (M.insert k v1 M.empty)) == Just (number (v1 + v2))
+
+  log "Test insertWith passes the first value as the first argument to the combining function"
+  quickCheck $ \k v1 v2 ->
+    M.lookup (smallKey k) (M.insertWith const k v2 (M.insert k v1 M.empty)) == Just (number v1)
 
   log "Test delete after inserting"
   quickCheck $ \k v -> M.isEmpty (M.delete (smallKey k) (M.insert k (number v) M.empty))
@@ -214,6 +222,29 @@ mapTests = do
           Just v | in1        -> Just v == v1
           Just v              -> Just v == v2
           Nothing             -> not (in1 || in2)
+
+  log "Lookup from intersection"
+  quickCheck $ \(TestMap m1) (TestMap m2) k ->
+    M.lookup (smallKey k) (M.intersection (m1 :: M.Map SmallKey Int) (m2 :: M.Map SmallKey Int)) == (case M.lookup k m2 of
+      Nothing -> Nothing
+      Just v -> M.lookup k m1) <?> ("m1: " <> show m1 <> ", m2: " <> show m2 <> ", k: " <> show k <> ", v1: " <> show (M.lookup k m1) <> ", v2: " <> show (M.lookup k m2) <> ", intersection: " <> show (M.intersection m1 m2))
+
+  log "Intersection is idempotent"
+  quickCheck $ \(TestMap m1) (TestMap m2) -> ((m1 :: M.Map SmallKey Int) `M.intersection` m2) == ((m1 `M.intersection` m2) `M.intersection` (m2 :: M.Map SmallKey Int))
+
+  log "intersectionWith"
+  for_ [(+), (*)] $ \op ->
+    quickCheck $ \(TestMap m1) (TestMap m2) k ->
+      let u = M.intersectionWith op m1 m2 :: M.Map SmallKey Int
+      in case M.lookup k u of
+           Nothing -> not (M.member k m1 && M.member k m2)
+           Just v -> Just v == (op <$> M.lookup k m1 <*> M.lookup k m2)
+
+  log "difference"
+  quickCheck $ \(TestMap m1) (TestMap m2) ->
+    let d = M.difference (m1 :: M.Map SmallKey Int) (m2 :: M.Map SmallKey String)
+    in and (map (\k -> M.member k m1) (A.fromFoldable $ M.keys d)) &&
+       and (map (\k -> not $ M.member k d) (A.fromFoldable $ M.keys m2))
 
   log "size"
   quickCheck $ \xs ->

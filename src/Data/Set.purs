@@ -24,6 +24,8 @@ module Data.Set
   , subset
   , properSubset
   , intersection
+  , filter
+  , mapMaybe
   ) where
 
 import Prelude hiding (map)
@@ -34,7 +36,7 @@ import Data.Foldable (class Foldable, foldMap, foldl, foldr)
 import Data.List (List)
 import Data.List as List
 import Data.Map.Internal as M
-import Data.Maybe (Maybe)
+import Data.Maybe (Maybe, maybe)
 import Data.Ord (class Ord1)
 import Data.Unfoldable (class Unfoldable)
 import Partial.Unsafe (unsafePartial)
@@ -173,3 +175,13 @@ intersection s1 s2 = fromFoldable intersect
         LT -> go acc (l + 1) r
         GT -> go acc l (r + 1)
       else acc
+
+-- | Filter out those values of a set for which a predicate on the value fails
+-- | to hold.
+filter :: forall a. Ord a => (a -> Boolean) -> Set a -> Set a
+filter f (Set s) = Set (M.filterWithKey (\k _ -> f k) s)
+
+-- | Applies a function to each value in a set, discarding entries where the
+-- | function returns `Nothing`.
+mapMaybe :: forall a b. Ord b => (a -> Maybe b) -> Set a -> Set b
+mapMaybe f = foldr (\a acc -> maybe acc (\b -> insert b acc) (f a)) empty
