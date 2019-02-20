@@ -1,0 +1,19 @@
+{
+  "name": "purescript-ordered-collections",
+  "set": "id3as-20190220",
+  "source": "https://github.com/id3as/purerl-package-sets.git",
+  "depends": 
+    [ "arrays"
+      , "foldable-traversable"
+      , "gen"
+      , "lists"
+      , "maybe"
+      , "partial"
+      , "prelude"
+      , "tailrec"
+      , "tuples"
+      , "unfoldable"
+      , "unsafe-coerce"
+      ]
+  
+}
