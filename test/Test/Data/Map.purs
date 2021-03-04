@@ -4,6 +4,7 @@ import Prelude
 
 import Control.Alt ((<|>))
 import Data.Array as A
+import Data.Array.NonEmpty (cons')
 import Data.Foldable (foldl, for_, all, and)
 import Data.FoldableWithIndex (foldrWithIndex)
 import Data.Function (on)
@@ -13,12 +14,13 @@ import Data.List.NonEmpty as NEL
 import Data.Map as M
 import Data.Map.Gen (genMap)
 import Data.Maybe (Maybe(..), fromMaybe, maybe)
-import Data.NonEmpty ((:|))
+import Data.Semigroup.First (First(..))
+import Data.Semigroup.Last (Last(..))
 import Data.Tuple (Tuple(..), fst, uncurry)
 import Effect (Effect)
 import Effect.Console (log)
 import Partial.Unsafe (unsafePartial)
-import Test.QuickCheck ((<?>), (===), quickCheck, quickCheck')
+import Test.QuickCheck ((<?>), (<=?), (===), quickCheck, quickCheck')
 import Test.QuickCheck.Arbitrary (class Arbitrary, arbitrary)
 import Test.QuickCheck.Gen (elements, oneOf)
 
@@ -44,7 +46,7 @@ instance showSmallKey :: Show SmallKey where
   show J = "J"
 
 instance arbSmallKey :: Arbitrary SmallKey where
-  arbitrary = elements $ A :| [B, C, D, E, F, G, H, I, J]
+  arbitrary = elements $ cons' A [B, C, D, E, F, G, H, I, J]
 
 data Instruction k v = Insert k v | Delete k
 
@@ -53,7 +55,7 @@ instance showInstruction :: (Show k, Show v) => Show (Instruction k v) where
   show (Delete k) = "Delete (" <> show k <> ")"
 
 instance arbInstruction :: (Arbitrary k, Arbitrary v) => Arbitrary (Instruction k v) where
-  arbitrary = oneOf $ (Insert <$> arbitrary <*> arbitrary) :| [Delete <$> arbitrary]
+  arbitrary = oneOf $ cons' (Insert <$> arbitrary <*> arbitrary) [Delete <$> arbitrary]
 
 runInstructions :: forall k v. Ord k => List (Instruction k v) -> M.Map k v -> M.Map k v
 runInstructions instrs t0 = foldl step t0 instrs
@@ -162,7 +164,7 @@ mapTests = do
 
   log "sort . toUnfoldable . fromFoldable = sort (on lists without key-duplicates)"
   quickCheck $ \(list :: List (Tuple SmallKey Int)) ->
-    let nubbedList = nubBy ((==) `on` fst) list
+    let nubbedList = nubBy (compare `on` fst) list
         f x = M.toUnfoldable (M.fromFoldable x)
     in sort (f nubbedList) == sort nubbedList <?> show nubbedList
 
@@ -240,6 +242,12 @@ mapTests = do
            Nothing -> not (M.member k m1 && M.member k m2)
            Just v -> Just v == (op <$> M.lookup k m1 <*> M.lookup k m2)
 
+  log "map-apply is equivalent to intersectionWith"
+  for_ [(+), (*)] $ \op ->
+    quickCheck $ \(TestMap m1) (TestMap m2) ->
+      let u = M.intersectionWith op m1 m2 :: M.Map SmallKey Int
+      in u == (op <$> m1 <*> m2)
+
   log "difference"
   quickCheck $ \(TestMap m1) (TestMap m2) ->
     let d = M.difference (m1 :: M.Map SmallKey Int) (m2 :: M.Map SmallKey String)
@@ -248,7 +256,7 @@ mapTests = do
 
   log "size"
   quickCheck $ \xs ->
-    let xs' = nubBy ((==) `on` fst) xs
+    let xs' = nubBy (compare `on` fst) xs
     in  M.size (M.fromFoldable xs') == length (xs' :: List (Tuple SmallKey Int))
 
   log "lookupLE result is correct"
@@ -315,7 +323,7 @@ mapTests = do
 
   log "filterWithKey keeps those keys for which predicate is true"
   quickCheck $ \(TestMap s :: TestMap String Int) p ->
-                 A.all (uncurry p) (M.toUnfoldable (M.filterWithKey p s) :: Array (Tuple String Int))
+                 all (uncurry p) (M.toUnfoldable (M.filterWithKey p s) :: Array (Tuple String Int))
 
   log "filterKeys gives submap"
   quickCheck $ \(TestMap s :: TestMap String Int) p ->
@@ -323,7 +331,7 @@ mapTests = do
 
   log "filterKeys keeps those keys for which predicate is true"
   quickCheck $ \(TestMap s :: TestMap String Int) p ->
-                 A.all p (M.keys (M.filterKeys p s))
+                 all p (M.keys (M.filterKeys p s))
 
   log "filter gives submap"
   quickCheck $ \(TestMap s :: TestMap String Int) p ->
@@ -331,7 +339,7 @@ mapTests = do
 
   log "filter keeps those values for which predicate is true"
   quickCheck $ \(TestMap s :: TestMap String Int) p ->
-                 A.all p (M.values (M.filter p s))
+                 all p (M.values (M.filter p s))
 
   log "submap with no bounds = id"
   quickCheck \(TestMap m :: TestMap SmallKey Int) ->
@@ -370,3 +378,50 @@ mapTests = do
   quickCheck \(TestMap m :: TestMap Int Int) ->
     let outList = foldrWithIndex (\i a b -> (Tuple i a) : b) Nil m
     in outList == sort outList
+
+  log "bind"
+  quickCheck $ \(TestMap m1) (TestMap m2 :: TestMap SmallKey Int) (TestMap m3) k ->
+    let
+      u = do
+        v <- m1
+        if v then m2 else m3
+    in case M.lookup k m1 of
+      Just true -> M.lookup k m2 == M.lookup k u
+      Just false -> M.lookup k m3 == M.lookup k u
+      Nothing -> not $ M.member k u
+
+  log "catMaybes creates a new map of size less than or equal to the original"
+  quickCheck \(TestMap m :: TestMap Int (Maybe Int)) -> do
+    let result = M.catMaybes m
+    M.size result <=? M.size m
+
+  log "catMaybes drops key/value pairs with Nothing values"
+  quickCheck \(TestMap m :: TestMap Int Int) -> do
+    let maybeMap = M.alter (const $ Just Nothing) 1 $ map Just m
+    let result = M.catMaybes maybeMap
+    let expected = M.delete 1 m
+    result === expected
+
+  log "SemigroupMap's Semigroup instance is based on value's Semigroup instance"
+  quickCheck \(Tuple leftStr rightStr :: Tuple String String) -> do
+    let key = "foo"
+    let left = smSingleton key leftStr
+    let right = smSingleton key rightStr
+    let result = left <> right
+    let expected = smSingleton key $ leftStr <> rightStr
+    result == expected
+  quickCheck \(Tuple leftStr rightStr :: Tuple String String) -> do
+    let key = "foo"
+    let left = smSingleton key $ First leftStr
+    let right = smSingleton key $ First rightStr
+    let result = left <> right
+    result == left
+  quickCheck \(Tuple leftStr rightStr :: Tuple String String) -> do
+    let key = "foo"
+    let left = smSingleton key $ Last leftStr
+    let right = smSingleton key $ Last rightStr
+    let result = left <> right
+    result == right
+
+smSingleton :: forall key value. key -> value -> M.SemigroupMap key value
+smSingleton k v = M.SemigroupMap (M.singleton k v)

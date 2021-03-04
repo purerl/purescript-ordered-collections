@@ -26,6 +26,9 @@ module Data.Set
   , intersection
   , filter
   , mapMaybe
+  , catMaybes
+  , toMap
+  , fromMap
   ) where
 
 import Prelude hiding (map)
@@ -63,7 +66,7 @@ instance eq1Set :: Eq1 Set where
   eq1 = eq
 
 instance showSet :: Show a => Show (Set a) where
-  show s = "(fromFoldable " <> show (toList s) <> ")"
+  show s = "(fromFoldable " <> show (toUnfoldable s :: Array a) <> ")"
 
 instance ordSet :: Ord a => Ord (Set a) where
   compare s1 s2 = compare (toList s1) (toList s2)
@@ -185,3 +188,16 @@ filter f (Set s) = Set (M.filterWithKey (\k _ -> f k) s)
 -- | function returns `Nothing`.
 mapMaybe :: forall a b. Ord b => (a -> Maybe b) -> Set a -> Set b
 mapMaybe f = foldr (\a acc -> maybe acc (\b -> insert b acc) (f a)) empty
+
+-- | Filter a set of optional values, discarding values that contain `Nothing`
+catMaybes :: forall a. Ord a => Set (Maybe a) -> Set a
+catMaybes = mapMaybe identity
+
+-- | A set is a map with no value attached to each key.
+toMap :: forall a. Set a -> M.Map a Unit
+toMap (Set s) = s
+
+-- | A map with no value attached to each key is a set.
+-- | See also `Data.Map.keys`.
+fromMap :: forall a. M.Map a Unit -> Set a
+fromMap = Set

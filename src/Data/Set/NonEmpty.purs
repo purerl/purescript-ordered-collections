@@ -26,6 +26,7 @@ module Data.Set.NonEmpty
 
 import Prelude hiding (map)
 
+import Data.Array.NonEmpty (NonEmptyArray)
 import Data.Eq (class Eq1)
 import Data.Foldable (class Foldable)
 import Data.List (List, (:))
@@ -33,7 +34,7 @@ import Data.List as List
 import Data.List.NonEmpty (NonEmptyList)
 import Data.Maybe (Maybe(..), fromJust)
 import Data.Ord (class Ord1)
-import Data.Semigroup.Foldable (class Foldable1, foldMap1)
+import Data.Semigroup.Foldable (class Foldable1, foldMap1, foldr1, foldl1)
 import Data.Set (Set)
 import Data.Set as Set
 import Data.Tuple (Tuple(..))
@@ -52,10 +53,11 @@ derive newtype instance foldableNonEmptySet :: Foldable NonEmptySet
 
 instance foldable1NonEmptySet :: Foldable1 NonEmptySet where
   foldMap1 f = foldMap1 f <<< (toUnfoldable1 :: forall a. NonEmptySet a -> NonEmptyList a)
-  fold1 = foldMap1 identity
+  foldr1 f = foldr1 f <<< (toUnfoldable1 :: forall a. NonEmptySet a -> NonEmptyList a)
+  foldl1 f = foldl1 f <<< (toUnfoldable1 :: forall a. NonEmptySet a -> NonEmptyList a)
 
 instance showNonEmptySet :: Show a => Show (NonEmptySet a) where
-  show s = "(fromFoldable1 " <> show (toUnfoldable1 s :: NonEmptyList a) <> ")"
+  show s = "(fromFoldable1 " <> show (toUnfoldable1 s :: NonEmptyArray a) <> ")"
 
 -- | Create a set with one element.
 singleton :: forall a. a -> NonEmptySet a
